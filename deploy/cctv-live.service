@@ -1,0 +1,63 @@
+[Unit]
+Description=Demand-driven private CCTV live pipelines
+After=network.target
+RequiresMountsFor=/opt/cctv-web /var/cache/cctv-live
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=exec
+User=cctv-live
+Group=cctv-web
+SupplementaryGroups=www-data
+WorkingDirectory=/opt/cctv-web
+EnvironmentFile=/etc/cctv/cameras.env
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=TMPDIR=/run/cctv-live
+ExecStart=/opt/cctv-web/.venv/bin/python /opt/cctv-web/deploy/live_serve.py
+RuntimeDirectory=cctv-live
+RuntimeDirectoryMode=0750
+UMask=0027
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=30
+KillMode=mixed
+OOMPolicy=stop
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+RestrictSUIDSGID=yes
+LockPersonality=yes
+RestrictRealtime=yes
+RestrictNamespaces=yes
+SystemCallArchitectures=native
+SystemCallFilter=~@mount @reboot @swap @raw-io @clock @module
+SystemCallErrorNumber=EPERM
+RestrictAddressFamilies=AF_UNIX AF_INET
+ReadOnlyPaths=/opt/cctv-web
+ReadWritePaths=/var/cache/cctv-live /run/cctv-live
+InaccessiblePaths=/srv/cctv /etc/cctv /etc/nginx /etc/letsencrypt -/run/dbus -/run/systemd/private
+MemoryHigh=1G
+MemoryMax=1536M
+MemorySwapMax=0
+TasksMax=256
+LimitNOFILE=512
+CPUQuota=200%
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=cctv-live
+
+[Install]
+WantedBy=multi-user.target

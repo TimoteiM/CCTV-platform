@@ -1,0 +1,70 @@
+[Unit]
+Description=Local CCTV person detection and timeline indexing
+After=network.target
+RequiresMountsFor=/opt/cctv-web /srv/cctv /var/lib/cctv-persons
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=exec
+User=cctv-detect
+Group=cctv-web
+SupplementaryGroups=cctv
+WorkingDirectory=/opt/cctv-web
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=CCTV_RECORDINGS_ROOT=/srv/cctv
+Environment=CCTV_PERSON_EVENTS_ROOT=/var/lib/cctv-persons
+Environment=CCTV_PERSON_MODEL=/opt/cctv-web/models/yolov5n-v7.0-fp32.onnx
+Environment=OMP_NUM_THREADS=1
+Environment=OPENBLAS_NUM_THREADS=1
+ExecStart=/opt/cctv-web/.detect-venv/bin/python -m app.person_detector
+StateDirectory=cctv-persons
+StateDirectoryMode=0750
+UMask=0027
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+KillMode=control-group
+Nice=19
+CPUWeight=10
+CPUQuota=150%
+IOWeight=10
+IOSchedulingClass=idle
+MemoryHigh=384M
+MemoryMax=512M
+MemorySwapMax=0
+TasksMax=32
+LimitNOFILE=256
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+RestrictSUIDSGID=yes
+LockPersonality=yes
+RestrictRealtime=yes
+RestrictNamespaces=yes
+SystemCallArchitectures=native
+SystemCallFilter=~@mount @reboot @swap @raw-io @clock @module
+SystemCallErrorNumber=EPERM
+RestrictAddressFamilies=AF_UNIX
+IPAddressDeny=any
+ReadOnlyPaths=/opt/cctv-web /srv/cctv
+ReadWritePaths=/var/lib/cctv-persons
+InaccessiblePaths=/etc/cctv /etc/nginx /etc/letsencrypt -/run/dbus -/run/systemd/private
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=cctv-persons
+
+[Install]
+WantedBy=multi-user.target

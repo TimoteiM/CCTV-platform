@@ -1,0 +1,6 @@
+{
+  "source": "https://github.com/ultralytics/yolov5/releases/download/v7.0/yolov5n.onnx",
+  "original_sha256": "04f0e55c26f58d17145b36045780fe1250d5bd2187543e11568e5141d05b3262",
+  "runtime_sha256": "88d9096e76c0bf6ecf364041f5a218d65a3509146de36a82c22d8392d72c0500",
+  "conversion": "FP16 tensor constants and graph types converted to FP32 for CPU inference"
+}

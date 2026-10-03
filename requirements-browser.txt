@@ -1,0 +1,2 @@
+# Optional development-only browser tests; not required by the application.
+playwright==1.63.0

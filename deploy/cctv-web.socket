@@ -1,0 +1,12 @@
+[Unit]
+Description=Loopback HTTP socket for CCTV web application
+
+[Socket]
+ListenStream=127.0.0.1:8080
+Accept=no
+Backlog=128
+NoDelay=yes
+Service=cctv-web.service
+
+[Install]
+WantedBy=sockets.target

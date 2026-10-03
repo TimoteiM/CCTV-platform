@@ -1,0 +1,4 @@
+{% extends 'base.html' %}{% block content %}
+<p class="eyebrow">RECORDING ARCHIVE</p><h1>Your cameras</h1><p class="muted">Choose a camera to browse recordings by date.</p>
+<div class="camera-grid">{% for id,name in cameras.items() %}<a class="camera-card" href="/camera/{{ id }}"><span class="camera-icon" aria-hidden="true">▣</span><span class="eyebrow">{{ id|upper }}</span><h2>{{ name }}</h2><span>Browse recordings <span aria-hidden="true">→</span></span></a>{% endfor %}</div>
+{% endblock %}
