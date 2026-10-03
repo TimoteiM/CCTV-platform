@@ -1,0 +1,27 @@
+services:
+  frigate:
+    container_name: cctv-frigate
+    image: ghcr.io/blakeblackshear/frigate:0.17.2@sha256:d4351369984d4a9e2a49ac59736f6490856a7ea11f7790040746d21496967010
+    restart: unless-stopped
+    shm_size: '256mb'
+    cpus: 2.5
+    cpuset: "0-2"
+    cpu_shares: 256
+    mem_limit: 3g
+    pids_limit: 1024
+    environment:
+      TZ: Europe/Bucharest
+      OMP_NUM_THREADS: '2'
+      OPENBLAS_NUM_THREADS: '1'
+    volumes:
+      - /var/lib/cctv-frigate/config:/config
+      - /var/lib/cctv-frigate/media:/media/frigate
+    tmpfs:
+      - /tmp/cache:size=268435456
+    ports:
+      - '127.0.0.1:5000:5000'
+    logging:
+      driver: json-file
+      options:
+        max-size: '10m'
+        max-file: '3'

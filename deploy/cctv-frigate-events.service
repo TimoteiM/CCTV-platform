@@ -1,0 +1,41 @@
+[Unit]
+Description=Import Frigate person detections into CCTV timelines
+After=docker.service network.target
+Requires=docker.service
+
+[Service]
+Type=exec
+User=cctv-detect
+Group=cctv-web
+WorkingDirectory=/opt/cctv-web
+Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=PYTHONUNBUFFERED=1
+Environment=CCTV_FRIGATE_EVENTS_ROOT=/var/lib/cctv-frigate-events
+ExecStart=/opt/cctv-web/.venv/bin/python -m app.frigate_events
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=20
+StateDirectory=cctv-frigate-events
+StateDirectoryMode=0750
+UMask=0027
+Nice=15
+CPUQuota=25%
+MemoryMax=256M
+TasksMax=16
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_UNIX AF_INET
+ReadWritePaths=/var/lib/cctv-frigate-events
+InaccessiblePaths=/etc/cctv /etc/nginx /etc/letsencrypt /var/lib/cctv-frigate
+
+[Install]
+WantedBy=multi-user.target

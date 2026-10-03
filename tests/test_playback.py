@@ -15,7 +15,7 @@ from app.playback import PlaybackManager
 
 OLD='2026-10-01_10-00-00.mkv'
 NEXT='2026-10-01_11-00-00.mkv'
-DATA=b'0123456789'*100
+DATA=b'abcdefghij'*100
 
 class FakeConverter:
     def __init__(self,blocked=False,fail=False):

@@ -1,4 +1,4 @@
-# CCTV recordings web application — Phase 6 (final authenticated validation pending)
+# CCTV platform
 
 FastAPI/Jinja2 application in `/opt/cctv-web`. The recorder, retention, nginx,
 authentication, firewall, and camera credential environment remain untouched.
@@ -419,3 +419,91 @@ Final validation: 213 Python tests passed. Chromium browser checks passed at
 scored 100 for Live and Playback at both requested sizes. The only test warning
 is the existing Starlette/httpx deprecation. Optional export validation reports
 capacity limits before starting a download; export releases its own spare buffer.
+
+## Frigate integration — 2026-10-03
+
+The pre-Frigate source is preserved on GitHub at commit
+`313b34e8622d078369f19ead8c7ab248cdd98ad4`. Credentials, recordings, screenshots,
+virtual environments, runtime databases and model binaries are excluded from Git.
+`deploy/cctv-web.env.example` documents application settings; copy it to the
+ignored `deploy/cctv-web.env` when installing on a new host.
+
+Frigate 0.17.2 runs as `cctv-frigate`, using the official image pinned by digest in
+`deploy/frigate/compose.yaml`. It tracks people continuously on all eight camera
+substreams, with OpenVINO CPU inference and the bundled SSDLite MobileNet model.
+This host has six vCPUs and no exposed GPU/accelerator. Detection uses 640×360 at
+2 fps, CPU cores 0–2, a 2.5-core quota, lower CPU shares, a 3 GiB memory limit and
+256 MiB shared memory. Adjust the CPU set on hosts with different hardware.
+The separate live engine continues to use its existing CPU allocation. Its overload
+guard measures sustained stalls in its own cgroup, instead of global host load,
+so unrelated AI startup threads do not tear down healthy live streams.
+
+Frigate supplies detection to the existing UI. The recorder, original MKVs,
+retention, live endpoints, playback windows and export remain in the current
+system. Frigate recording is disabled, preventing a second video archive. Event snapshots
+are enabled with one-day retention because Frigate persists tracked events only
+when clips or snapshots are enabled. These private images stay in its media volume.
+Its configuration/database and media directory live under `/var/lib/cctv-frigate`;
+it never mounts the original `/srv/cctv` recordings. The internal API is published
+only at `127.0.0.1:5000`; its UI, RTSP and WebRTC ports are not publicly published.
+
+`deploy/frigate/provision.py` reads the existing root-only camera environment and
+writes a root-only Frigate configuration without logging credentials. Real camera
+URLs never enter Git or the browser. `config.example.yaml` contains placeholders.
+Frigate itself necessarily knows camera credentials: restrict access to Docker
+and its private logs/configuration just as you restrict the recorder's account.
+
+Install Docker/Compose, then:
+
+```sh
+python3 deploy/frigate/provision.py
+docker compose -f deploy/frigate/compose.yaml up -d
+cp deploy/cctv-frigate-events.service /etc/systemd/system/
+systemctl daemon-reload
+systemctl enable --now cctv-frigate-events
+systemctl restart cctv-web
+```
+
+Configure `CCTV_FRIGATE_EVENTS_ROOT=/var/lib/cctv-frigate-events` for the web app.
+The importer runs as `cctv-detect`, calls only the local Frigate API, polls every
+five seconds, validates/paginates events, excludes false positives, updates active
+tracks and stores a bounded 31-day index. It writes atomic, read-only timeline
+JSON files, splitting Unix timestamps at local Europe/Bucharest midnight. Camera
+OSD clock offsets are not used. Successful camera processing intervals are indexed
+separately; outages do not imply that no person was present.
+
+The web service retains its network restrictions and reads these local files.
+Yellow markers merge genuine new Frigate events with historical YOLO detections;
+the old index is preserved. The UI identifies Frigate and reports loss of its
+connection while retaining recorded markers. Frigate analyzes live streams from
+installation onward; historical files are not retroactively analyzed by Frigate.
+The original `cctv-persons` worker is disabled to avoid duplicate inference.
+
+```sh
+systemctl status cctv-frigate-events
+docker compose -f deploy/frigate/compose.yaml ps
+docker stats --no-stream cctv-frigate
+journalctl -u cctv-frigate-events --since '10 minutes ago'
+```
+
+To roll back detection, stop the importer and Frigate, remove the
+`CCTV_FRIGATE_EVENTS_ROOT` setting, restart the web app and re-enable
+`cctv-persons`. The original recording and historical indexes remain available.
+
+Tests cover local midnight, fractional timestamps, event filtering/deduplication,
+active-track updates, camera outages, historical merging and configuration.
+The integration is validated using known person footage and browser checks with
+Frigate running. Production and validation footage are never committed.
+
+Frigate validation: 227 Python tests passed. The official OpenVINO model detected
+the person in a known camera-region fixture at 0.897 confidence; the complete
+Frigate motion/tracking pipeline produced a real person event at 0.748 confidence
+from a private replay of recorded footage. The importer converted its actual API
+events into the expected timeline intervals. The isolated validation container was
+removed afterward; no replay events were added to the production index.
+
+The combined Chromium check kept all eight live feeds and playback running while
+Frigate processed all eight streams at approximately 1.5–2 fps, without JavaScript
+errors. Mobile/desktop live and playback checks also passed with Frigate enabled;
+buffered skips continued to reuse their existing sessions. Normal Frigate memory
+usage was about 1 GiB; CPU use varied by motion and stayed under its quota.

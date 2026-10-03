@@ -35,7 +35,7 @@ def create_app(settings=None, playback=None):
     store = Store(settings)
     provider = playback or PlaybackManager(settings)
     instant = InstantPlayback(settings)
-    person_events = PersonEvents(settings.person_events_root)
+    person_events = PersonEvents(settings.person_events_root, settings.frigate_events_root)
     @asynccontextmanager
     async def lifespan(app):
         if hasattr(provider, "start"): provider.start()

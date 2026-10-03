@@ -1,0 +1,44 @@
+mqtt:
+  enabled: false
+detectors:
+  cpu_openvino:
+    type: openvino
+    device: CPU
+model:
+  model_type: ssd
+  width: 300
+  height: 300
+  input_tensor: nhwc
+  input_pixel_format: bgr
+  path: /openvino-model/ssdlite_mobilenet_v2.xml
+  labelmap_path: /openvino-model/coco_91cl_bkgr.txt
+ffmpeg:
+  global_args: -hide_banner -loglevel error -threads 1
+  hwaccel_args: []
+detect:
+  width: 640
+  height: 360
+  fps: 2
+objects:
+  track: [person]
+  filters:
+    person:
+      min_score: 0.5
+      threshold: 0.65
+record:
+  enabled: false
+snapshots:
+  enabled: true
+  clean_copy: false
+  retain:
+    default: 1
+birdseye:
+  enabled: false
+cameras:
+  cam01:
+    ffmpeg:
+      inputs:
+        - path: rtsp://USER:PASSWORD@CAMERA_HOST:15541/mpeg4cif
+          input_args: preset-rtsp-generic
+          roles: [detect]
+# Provisioning creates cam01 through cam08 from the existing private environment.

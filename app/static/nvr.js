@@ -767,11 +767,13 @@
             0,
           );
         $("#coverage-note").textContent =
-          data.person_events_source === "server" && total
-            ? `Person analysis: ${scanned > 0 && scanned / total < 0.01 ? "<1" : Math.round((scanned / total) * 100)}%`
-            : !intervals.length
-              ? "No recordings on this date."
-              : "";
+          data.person_events_source === "frigate"
+            ? `Frigate person detection${data.frigate_connected ? "" : " · offline"}`
+            : data.person_events_source === "server" && total
+              ? `Person analysis: ${scanned > 0 && scanned / total < 0.01 ? "<1" : Math.round((scanned / total) * 100)}%`
+              : !intervals.length
+                ? "No recordings on this date."
+                : "";
         draw();
         return data;
       } catch (error) {

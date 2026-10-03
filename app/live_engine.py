@@ -36,7 +36,15 @@ class LiveManager:
  def pressure(self):
   try:
    available=int(next(x for x in Path('/proc/meminfo').read_text().splitlines() if x.startswith('MemAvailable:')).split()[1])*1024
-   return available<2*1024**3 or os.getloadavg()[0]>8
+   if available<2*1024**3:return True
+   # Host load includes unrelated detector threads; use this service's sustained
+   # CPU stalls so healthy live streams are not torn down during AI startup.
+   try:
+    pressure=Path('/sys/fs/cgroup/system.slice/cctv-live.service/cpu.pressure').read_text()
+    full=next(line for line in pressure.splitlines() if line.startswith('full '))
+    values=dict(item.split('=') for item in full.split()[1:])
+    return float(values['avg10'])>90 and float(values['avg60'])>90
+   except (OSError,ValueError,StopIteration,KeyError):return False
   except OSError:return True
  def reap(self):
   with self.lock:

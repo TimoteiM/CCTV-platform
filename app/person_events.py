@@ -9,8 +9,9 @@ from pathlib import Path
 from .recordings import camera, day
 
 class PersonEvents:
-    def __init__(self, root=None):
+    def __init__(self, root=None, frigate_root=None):
         self.root = Path(root) if root else None
+        self.frigate_root = Path(frigate_root) if frigate_root else None
 
     def request(self, cam, date, point=None):
         """An eight-file priority mailbox; an absent mailbox keeps camera feeds read-only."""
@@ -56,6 +57,31 @@ class PersonEvents:
         return merged
 
     def for_day(self, cam, date):
+        legacy = self._for_day(cam, date)
+        if self.frigate_root is None:
+            return legacy
+        connected = False
+        fd = directory = None
+        try:
+            directory = os.open(self.frigate_root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+            fd = os.open("status.json", os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory)
+            info = os.fstat(fd)
+            if stat.S_ISREG(info.st_mode) and info.st_size <= 4096:
+                status = json.loads(os.read(fd, 4097))
+                updated = status.get("updated", 0)
+                connected = status.get("connected") is True and isinstance(updated, (int, float)) and 0 <= time.time()-updated <= 30 and cam in status.get("cameras", [])
+        except (OSError, ValueError, TypeError, AttributeError):
+            pass
+        finally:
+            if fd is not None: os.close(fd)
+            if directory is not None: os.close(directory)
+        current = PersonEvents(self.frigate_root)._for_day(cam, date)
+        if current["person_events_state"] != "available":
+            return {**legacy, "frigate_events_state": current["person_events_state"], "frigate_connected": connected}
+        merged = self.merge_intervals(legacy["person_events"] + current["person_events"])
+        return {**current, "person_events": merged, "frigate_events_state": "available", "frigate_connected": connected, "historical_person_events_source": legacy.get("person_events_source")}
+
+    def _for_day(self, cam, date):
         camera(cam)
         date = day(date).isoformat()
         if self.root is None:
@@ -69,7 +95,7 @@ class PersonEvents:
             if not stat.S_ISREG(info.st_mode) or info.st_size > 2 * 1024**2:
                 raise ValueError('Invalid event index')
             data = json.loads(os.read(event_fd, info.st_size+1))
-            if data.get('source') not in ('camera', 'server') or not isinstance(data.get('events'), list) or len(data['events']) > 10000:
+            if data.get('source') not in ('camera', 'server', 'frigate') or not isinstance(data.get('events'), list) or len(data['events']) > 10000:
                 raise ValueError('Invalid event index')
             events = []
             for item in data['events']:
@@ -88,7 +114,7 @@ class PersonEvents:
                 else:
                     merged.append(item)
             result={'person_events': merged, 'person_events_state': 'available', 'person_events_source': data['source']}
-            if data['source']=='server':
+            if data['source'] in ('server', 'frigate'):
                 result['person_analysis_intervals']=self.merge_intervals(data.get('analyzed',[]))
             return result
         except FileNotFoundError:
