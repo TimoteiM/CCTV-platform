@@ -112,3 +112,22 @@ def test_tampered_expired_and_changed_credentials(client):
     token = sessions.issue('operator', True)
     settings.auth_credentials.write_text('operator:' + apr_md5_crypt.hash('changed-fixture-password') + '\n')
     assert Sessions(settings.auth_credentials, settings.auth_state).lookup(token) is None
+
+@pytest.mark.parametrize('address', ['https://testserver', 'https://192.0.2.50', 'https://camera.example:8443'])
+def test_login_and_logout_from_current_browser_origin(client, address):
+    original, _ = client
+    c = TestClient(original.app, base_url=address)
+    response = c.get('/login')
+    csrf = re.search(r'name="csrf" value="([^"]+)"', response.text)[1]
+    result = c.post('/login', data={'csrf':csrf, 'username':'operator', 'password':'fixture-good-passphrase'}, headers={'Origin':address, 'Sec-Fetch-Site':'same-origin'}, follow_redirects=False)
+    assert result.status_code == 303
+    token = c.cookies.get(COOKIE)
+    assert c.post('/logout', data={'csrf':Sessions.digest(token)}, headers={'Origin':address}, follow_redirects=False).status_code == 303
+
+def test_login_rejects_foreign_origin(client):
+    c, _ = client
+    response = c.get('/login')
+    csrf = re.search(r'name="csrf" value="([^"]+)"', response.text)[1]
+    result = c.post('/login', data={'csrf':csrf, 'username':'operator', 'password':'fixture-good-passphrase'}, headers={'Origin':'https://foreign.example'}, follow_redirects=False)
+    assert result.status_code == 403
+    assert c.get('/auth/check').status_code == 401
