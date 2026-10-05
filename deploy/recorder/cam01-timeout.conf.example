@@ -6,7 +6,7 @@ ExecStart=/usr/bin/ffmpeg \
   -loglevel warning \
   -rtsp_transport tcp \
   -timeout 15000000 \
-  -i rtsp://${CAM_USER}:${CAM_PASS}@${HOME_PUBLIC_IP}:15543/mpeg4 \
+  -i rtsp://${CAM_USER}:${CAM_PASS}@${HOME_PUBLIC_IP}:15541/mpeg4 \
   -map 0 \
   -c copy \
   -f segment \
@@ -14,6 +14,6 @@ ExecStart=/usr/bin/ffmpeg \
   -segment_atclocktime 1 \
   -reset_timestamps 1 \
   -strftime 1 \
-  /srv/cctv/cam03/%%Y-%%m-%%d_%%H-%%M-%%S.mkv
+  /srv/cctv/cam01/%%Y-%%m-%%d_%%H-%%M-%%S.mkv
 
 TimeoutStopSec=20

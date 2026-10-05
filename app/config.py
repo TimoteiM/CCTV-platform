@@ -16,6 +16,7 @@ class Settings:
     cache_max_bytes: int = 2 * 1024**3
     playback_queue_size: int = 3
     conversion_timeout: int = 900
+    recorder_health_path: Path | None = None
     auth_credentials: Path | None = None
     auth_state: Path = Path('/var/lib/cctv-auth')
     frigate_events_root: Path | None = None
@@ -41,4 +42,4 @@ class Settings:
     def from_env(cls):
         names_path = Path(os.getenv('CCTV_CAMERA_NAMES', '/opt/cctv-web/cameras.json'))
         names = json.loads(names_path.read_text()) if names_path.exists() else {c: f'Acasă {i}' for i,c in enumerate(CAMERAS,1)}
-        return cls(auth_credentials=Path(os.environ['CCTV_AUTH_CREDENTIALS']) if os.getenv('CCTV_AUTH_CREDENTIALS') else None, auth_state=Path(os.getenv('CCTV_AUTH_STATE', '/var/lib/cctv-auth')), frigate_events_root=Path(os.environ['CCTV_FRIGATE_EVENTS_ROOT']) if os.getenv('CCTV_FRIGATE_EVENTS_ROOT') else None, person_events_root=Path(os.environ['CCTV_PERSON_EVENTS_ROOT']) if os.getenv('CCTV_PERSON_EVENTS_ROOT') else None, recordings_root=Path(os.getenv('CCTV_RECORDINGS_ROOT', '/srv/cctv')), minimum_age=int(os.getenv('CCTV_MINIMUM_AGE', '60')), download_mode=os.getenv('CCTV_DOWNLOAD_MODE', 'local'), camera_names=names, cache_root=Path(os.getenv('CCTV_CACHE_ROOT', '/opt/cctv-web/var/cache')), cache_max_age=int(os.getenv('CCTV_CACHE_MAX_AGE', '21600')), cache_max_bytes=int(os.getenv('CCTV_CACHE_MAX_BYTES', str(2 * 1024**3))), playback_queue_size=int(os.getenv('CCTV_PLAYBACK_QUEUE_SIZE', '3')), conversion_timeout=int(os.getenv('CCTV_CONVERSION_TIMEOUT', '900')))
+        return cls(recorder_health_path=Path(os.environ['CCTV_RECORDER_HEALTH_PATH']) if os.getenv('CCTV_RECORDER_HEALTH_PATH') else None, auth_credentials=Path(os.environ['CCTV_AUTH_CREDENTIALS']) if os.getenv('CCTV_AUTH_CREDENTIALS') else None, auth_state=Path(os.getenv('CCTV_AUTH_STATE', '/var/lib/cctv-auth')), frigate_events_root=Path(os.environ['CCTV_FRIGATE_EVENTS_ROOT']) if os.getenv('CCTV_FRIGATE_EVENTS_ROOT') else None, person_events_root=Path(os.environ['CCTV_PERSON_EVENTS_ROOT']) if os.getenv('CCTV_PERSON_EVENTS_ROOT') else None, recordings_root=Path(os.getenv('CCTV_RECORDINGS_ROOT', '/srv/cctv')), minimum_age=int(os.getenv('CCTV_MINIMUM_AGE', '60')), download_mode=os.getenv('CCTV_DOWNLOAD_MODE', 'local'), camera_names=names, cache_root=Path(os.getenv('CCTV_CACHE_ROOT', '/opt/cctv-web/var/cache')), cache_max_age=int(os.getenv('CCTV_CACHE_MAX_AGE', '21600')), cache_max_bytes=int(os.getenv('CCTV_CACHE_MAX_BYTES', str(2 * 1024**3))), playback_queue_size=int(os.getenv('CCTV_PLAYBACK_QUEUE_SIZE', '3')), conversion_timeout=int(os.getenv('CCTV_CONVERSION_TIMEOUT', '900')))

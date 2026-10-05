@@ -28,7 +28,7 @@ def sign_in(client, remember=False, **overrides):
     data.update(overrides)
     return client.post('/login', data=data, follow_redirects=False)
 
-@pytest.mark.parametrize('path', ['/api/events?date=2026-10-05', '/event-media/' + 'a'*64 + '.jpg', '/live-media/cam01/invalid/index.m3u8', '/download/cam01/foo', '/auth/check'])
+@pytest.mark.parametrize('path', ['/api/recording-health', '/api/events?date=2026-10-05', '/event-media/' + 'a'*64 + '.jpg', '/live-media/cam01/invalid/index.m3u8', '/download/cam01/foo', '/auth/check'])
 def test_private_endpoints_reject_anonymous(client, path):
     response = client[0].get(path)
     assert response.status_code == 401

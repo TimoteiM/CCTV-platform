@@ -1,0 +1,32 @@
+[Unit]
+Description=Check recording progress and recover stalled CCTV recorders
+After=local-fs.target
+RequiresMountsFor=/srv/cctv /opt/cctv-web
+
+[Service]
+Type=oneshot
+User=root
+Group=cctv-web
+SupplementaryGroups=cctv
+WorkingDirectory=/opt/cctv-web
+ExecStart=/opt/cctv-web/.venv/bin/python -m app.recorder_watchdog
+Environment=PYTHONDONTWRITEBYTECODE=1
+StateDirectory=cctv-recorder-watchdog
+StateDirectoryMode=0750
+UMask=0027
+TimeoutStartSec=100
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ReadOnlyPaths=/srv/cctv /opt/cctv-web
+InaccessiblePaths=/etc/cctv /etc/nginx /etc/letsencrypt
+RestrictAddressFamilies=AF_UNIX
+MemoryMax=128M
+TasksMax=16

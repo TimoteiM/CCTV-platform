@@ -587,12 +587,32 @@ recording modification time with the current time; check the recorder service as
 well as playback. Person detections use the separate Frigate stream and can exist
 without saved video. Detections alone cannot reconstruct missing footage.
 
-Acasă 3 uses `/etc/systemd/system/cctv-cam03.service.d/timeout.conf`, documented by
-`deploy/recorder/cam03-timeout.conf.example`. Its RTSP socket timeout is 15 seconds;
-the existing `Restart=always` and ten-second restart delay reconnect the recorder.
+All eight recorder units have `/etc/systemd/system/cctv-camXX.service.d/timeout.conf`
+overrides, documented under `deploy/recorder/`. Their RTSP socket timeout is 15
+seconds; existing `Restart=always` and ten-second restart delays reconnect them.
 Stopping a stuck recorder is bounded at 20 seconds. Credentials remain referenced
-through the original root-owned environment file. Other recording services and
-retention settings are unchanged.
+through the original root-owned environment file. Healthy recorders are left
+running; the connection timeout applies at their next start.
+
+`cctv-recorder-watchdog.timer` runs every 30 seconds and verifies nonempty recording
+files actually receive writes. After 120 seconds without writes, it restarts only
+the affected fixed recorder unit. A 120-second startup grace and 180-second restart
+cooldown prevent loops. Low disk space (less than 2 GiB) produces a warning instead
+of restarting every camera. The timer is enabled at boot and runs independently
+of the web server. It only reads recordings; retention is unchanged.
+
+The watchdog runs a root-owned, fixed-unit script without camera credentials,
+network sockets, or write access to recordings. Private state and status are stored
+in `/var/lib/cctv-recorder-watchdog` (root:cctv-web, 0750; JSON 0640).
+`CCTV_RECORDER_HEALTH_PATH` points the web app to `status.json`. The authenticated
+`/api/recording-health` route exposes only camera names and fixed status values.
+Live, Playback and Events show a warning for recovery, interrupted writes, low
+storage or a monitor status older than 100 seconds. Healthy cameras cause no
+warning. UI checks repeat every 30 seconds while the page is visible.
+
+Allow roughly 2–2.5 minutes to detect a stalled writer, plus reconnection time.
+Monitoring reduces outages but cannot restore unrecorded footage or overcome a
+camera power or network outage. Investigate repeated recovery warnings.
 
 New video becomes available after its five-minute segment closes and its last
 write is at least 60 seconds old. The active recording stays excluded from playback.

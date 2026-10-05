@@ -283,6 +283,31 @@ def create_app(settings=None, playback=None):
         if start is not None and (not chosen or not second(start)<=second(chosen)<=second(end)):chosen=start
         return templates.TemplateResponse(request=request,name='nvr_playback.html',context={**context(request),'cam':cam,'selected':selected.isoformat(),'selected_time':chosen or '', 'range_start':start,'range_end':end})
 
+    @app.get('/api/recording-health')
+    def recording_health():
+        import json, math
+        from .recorder_watchdog import CAMERAS as monitored
+        path = settings.recorder_health_path
+        if not path:
+            return {'configured': False, 'available': False, 'cameras': []}
+        try:
+            if path.stat().st_size > 8192: raise ValueError()
+            fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+            with os.fdopen(fd) as source: data = json.load(source)
+            checked = data['checked_at']
+            if not isinstance(checked, (int, float)) or not math.isfinite(checked) or not 0 <= time.time() - checked <= 100:
+                raise ValueError()
+            rows = data['cameras']
+            states = {'healthy', 'starting', 'recovering', 'stale', 'offline', 'storage-low', 'monitor-error'}
+            if len(rows) != 8 or {row['camera'] for row in rows} != set(monitored): raise ValueError()
+            result = []
+            for row in rows:
+                if row['status'] not in states: raise ValueError()
+                result.append({'camera': row['camera'], 'name': settings.camera_names[row['camera']], 'status': row['status']})
+            return {'configured': True, 'available': True, 'cameras': result}
+        except (OSError, ValueError, TypeError, KeyError):
+            return {'configured': True, 'available': False, 'cameras': []}
+
     @app.get('/api/camera/{cam}/calendar')
     def calendar(cam:str):
         with store.directory(cam) as fd:
