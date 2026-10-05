@@ -117,6 +117,10 @@
       help.showModal();
       return;
     }
+    if (event.key.toLowerCase() === "e") {
+      if (!$("#events-view")) location.href = "/events";
+      return;
+    }
     if (event.key.toLowerCase() === "l") {
       if (!$("#live-view")) location.href = "/live";
       return;
@@ -140,6 +144,12 @@
     } catch {}
     if (![1, 4, 8].includes(layout)) layout = 8;
     if (selector.selectedIndex < 0) selector.selectedIndex = 0;
+    const requestedCamera = new URL(location.href).searchParams.get("cam");
+    if (tiles.some((tile) => tile.dataset.camera === requestedCamera)) {
+      previousLayout = layout;
+      selector.value = requestedCamera;
+      layout = 1;
+    }
     const visible = (tile) =>
       !document.hidden && !tile.hidden && tile.intersecting;
     function state(tile, name, message = "") {

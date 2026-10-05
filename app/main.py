@@ -1,10 +1,11 @@
 import os
 import logging
+import time
 from datetime import datetime, timedelta
 from contextlib import asynccontextmanager
 from pathlib import Path
 from zoneinfo import ZoneInfo
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, Query
 from fastapi.responses import HTMLResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -15,6 +16,7 @@ from .timeline import coverage,locate,following,second
 from .live_client import LiveClient
 from .instant_playback import InstantPlayback
 from .person_events import PersonEvents
+from .event_catalog import EventCatalog
 from .media import media_response, SafeStreamingResponse
 
 BASE = Path(__file__).parent
@@ -22,6 +24,7 @@ REQUEST_LOG = logging.getLogger('cctv.request')
 
 def request_category(path):
     for prefix, category in (
+        ('/api/events', 'events'), ('/event-media/', 'event-media'), ('/events', 'events-page'),
         ('/api/live/', 'live-control'), ('/live-media/', 'live-media'), ('/api/timeline/', 'timeline'),
         ('/api/playback/status/', 'playback-status'), ('/api/playback/', 'playback-prepare'),
         ('/media/playback/', 'playback-media'), ('/download/', 'original-download'),
@@ -36,6 +39,7 @@ def create_app(settings=None, playback=None):
     provider = playback or PlaybackManager(settings)
     instant = InstantPlayback(settings)
     person_events = PersonEvents(settings.person_events_root, settings.frigate_events_root)
+    event_catalog = EventCatalog(settings.frigate_events_root)
     @asynccontextmanager
     async def lifespan(app):
         if hasattr(provider, "start"): provider.start()
@@ -150,6 +154,46 @@ def create_app(settings=None, playback=None):
     @app.get('/live',response_class=HTMLResponse)
     def live_page(request:Request):
         return templates.TemplateResponse(request=request,name='live.html',context=context(request))
+
+    @app.get('/events', response_class=HTMLResponse)
+    def events_page(request: Request, cam: str = 'all', date: str | None = None):
+        if cam != 'all': camera(cam)
+        selected = day(date).isoformat() if date else datetime.now(ZoneInfo('Europe/Bucharest')).date().isoformat()
+        return templates.TemplateResponse(request=request, name='events.html', context={**context(request), 'cam': cam, 'selected': selected})
+
+    @app.get('/api/events')
+    def events_list(date: str, cam: str = 'all', offset: int = Query(0, ge=0, le=80000), limit: int = Query(24, ge=1, le=48)):
+        day(date)
+        if cam != 'all': camera(cam)
+        rows, states = [], []
+        for chosen in (CAMERAS if cam == 'all' else (cam,)):
+            events, state = event_catalog.for_day(chosen, date, with_thumbnails=False)
+            rows.extend(events);states.append(state)
+        rows.sort(key=lambda item: (item['start'], item['id']), reverse=True)
+        selected = rows[offset:offset+limit]
+        today = datetime.now(ZoneInfo('Europe/Bucharest')).date().isoformat()
+        timelines = {}
+        for chosen in {item['camera'] for item in selected}:
+            try: timelines[chosen] = coverage(store, provider, chosen, date)
+            except HTTPException: timelines[chosen] = {'segments': []}
+        for item in selected:
+            event_catalog.hydrate_thumbnail(item)
+            point = int(item['point'])
+            available = lambda target: any(segment['start'] <= target < segment['end'] for segment in timelines[item['camera']]['segments'])
+            target = max(0, point-3)
+            if not available(target): target = point
+            item['recording_available'] = available(target)
+            item['recording_state'] = 'available' if item['recording_available'] else 'pending' if date == today and time.time()-item['start'] < 15*60 else 'unavailable'
+            item['camera_name'] = settings.camera_names[item['camera']]
+            item['playback_url'] = f"/playback?cam={item['camera']}&date={date}&t={target//3600:02}:{target%3600//60:02}:{target%60:02}" if item['recording_available'] else None
+        return {'events': selected, 'total': len(rows), 'offset': offset, 'limit': limit, 'camera': cam, 'date': date,
+                'status': event_catalog.status(), 'catalog_state': 'unavailable' if 'unavailable' in states else 'available' if 'available' in states else 'not_indexed',
+                'next_offset': offset+limit if offset+limit < len(rows) else None}
+
+    @app.api_route('/event-media/{token}.jpg', methods=['GET', 'HEAD'])
+    def event_thumbnail(request: Request, token: str):
+        content = event_catalog.thumbnail(token)
+        return Response(content if request.method == 'GET' else b'', media_type='image/jpeg', headers={'Content-Length': str(len(content))})
 
     @app.get('/playback',response_class=HTMLResponse)
     def playback_page(request:Request,cam:str='cam01',date:str|None=None,time:str|None=None,t:str|None=None,start:str|None=None,end:str|None=None):

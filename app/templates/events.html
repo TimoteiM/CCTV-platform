@@ -1,0 +1,19 @@
+{% extends 'base.html' %}{% from 'icons.html' import icon %}
+{% block title %}Events · Acasă{% endblock %}
+{% block content %}
+<section id="events-view" data-camera="{{ cam }}" data-date="{{ selected }}" aria-labelledby="events-heading">
+  <div class="workspace-tools events-heading"><div><p class="eyebrow">SMART ACTIVITY</p><h1 id="events-heading">Events</h1><p class="muted">Person detections from Frigate · Europe/Bucharest</p></div><span id="events-status" class="event-status" role="status"><span class="status-dot"></span> Connecting to Frigate…</span></div>
+  <form id="events-filters" class="panel events-filters" action="/events" method="get">
+    <label>Camera<select id="events-camera" name="cam"><option value="all" {% if cam=='all' %}selected{% endif %}>All cameras</option>{% for id,name in cameras.items() %}<option value="{{ id }}" {% if cam==id %}selected{% endif %}>{{ name }}</option>{% endfor %}</select></label>
+    <label>Recording date<input type="date" id="events-date" name="date" value="{{ selected }}" min="0001-01-01" max="9999-12-31" required></label>
+    <button type="submit">Apply filters</button><button type="button" id="events-today" class="secondary">Today</button><button type="button" id="events-refresh" class="secondary">{{ icon('history') }} Refresh</button>
+  </form>
+  <div class="events-summary"><p id="events-count" role="status">Loading events…</p><span id="events-updated" class="small"></span></div>
+  <div id="events-error" class="panel event-error" role="alert" hidden><p>Events could not be loaded.</p><button type="button" id="events-retry" class="secondary">Retry</button></div>
+  <div id="events-grid" class="events-grid" aria-busy="true"></div>
+  <div id="events-empty" class="panel events-empty" hidden>{{ icon('person') }}<h2>No person events on this date</h2><p class="muted">Choose another camera or date. New events appear as Frigate detects people.</p><p class="small">Historical YOLO detections remain available as yellow markers in Playback.</p><a class="button secondary" href="/playback">Open Playback</a></div>
+  <nav class="events-pagination" aria-label="Event pages"><button id="events-previous" type="button" class="secondary" disabled>{{ icon('back') }} Previous</button><span id="events-page" class="small"></span><button id="events-next" type="button" class="secondary" disabled>Next {{ icon('next') }}</button></nav>
+  <p class="small events-footnote">AI detections are estimates. Event thumbnails are retained for one day. Matching playback becomes available after the recording segment is finalized.</p>
+</section>
+<dialog id="event-details" aria-labelledby="event-detail-title"><div class="dialog-heading"><h2 id="event-detail-title">Person event</h2><button type="button" class="close-dialog icon-button" aria-label="Close event details">{{ icon('close') }}</button></div><div id="event-detail-image" class="event-detail-image"></div><dl id="event-detail-facts" class="event-facts"></dl><div class="event-detail-actions"><a id="event-playback" class="button">{{ icon('play') }} Play recording</a><a id="event-live" class="button secondary">{{ icon('camera') }} Watch live</a></div><p id="event-recording-note" class="small"></p></dialog>
+{% endblock %}

@@ -15,6 +15,7 @@ import httpx
 
 from .config import CAMERAS
 from .person_events import PersonEvents
+from .event_catalog import event_token, event_metadata, RAW_ID
 
 TZ = ZoneInfo('Europe/Bucharest')
 LOG = logging.getLogger('cctv.frigate')
@@ -53,10 +54,17 @@ class FrigateIndex:
         self.db = sqlite3.connect(self.root/'events.sqlite')
         self.db.execute('CREATE TABLE IF NOT EXISTS events (id TEXT PRIMARY KEY, camera TEXT, start REAL, end REAL, active INTEGER)')
         self.db.execute('CREATE TABLE IF NOT EXISTS coverage (camera TEXT, date TEXT, start REAL, end REAL, PRIMARY KEY(camera,date,start))')
+        columns = {row[1] for row in self.db.execute('PRAGMA table_info(events)')}
+        for name, definition in [('metadata', "TEXT NOT NULL DEFAULT '{}'"), ('thumbnail_checked', 'REAL NOT NULL DEFAULT 0')]:
+            if name not in columns:
+                self.db.execute('ALTER TABLE events ADD COLUMN '+name+' '+definition)
+        self.db.commit()
         self.previous = None
         self.previous_cameras = set()
         self.since = self.clock()-31*86400
         self.dirty = set()
+        for cam, start, end in self.db.execute('SELECT camera,start,end FROM events'):
+            self.dirty.update((cam, date) for date, _, _ in split_event(start, end))
 
     def get(self, path, params=None):
         with self.client.stream('GET', path, params=params) as response:
@@ -72,7 +80,7 @@ class FrigateIndex:
         if not isinstance(event, dict) or event.get('label') != 'person' or event.get('camera') not in CAMERAS:
             return
         identifier = event.get('id')
-        if not isinstance(identifier, str) or not 1 <= len(identifier) <= 128:
+        if not isinstance(identifier, str) or not RAW_ID.fullmatch(identifier):
             return
         if event.get('false_positive'):
             old = self.db.execute('SELECT camera,start,end FROM events WHERE id=?', (identifier,)).fetchone()
@@ -92,7 +100,7 @@ class FrigateIndex:
         old = self.db.execute('SELECT start,end FROM events WHERE id=?', (identifier,)).fetchone()
         if old:
             self.dirty.update((event['camera'], day) for day, _, _ in split_event(*old))
-        self.db.execute('INSERT OR REPLACE INTO events VALUES (?,?,?,?,?)', (identifier, event['camera'], start, end, int(active)))
+        self.db.execute('INSERT INTO events (id,camera,start,end,active,metadata) VALUES (?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET camera=excluded.camera,start=excluded.start,end=excluded.end,active=excluded.active,metadata=excluded.metadata', (identifier, event['camera'], start, end, int(active), json.dumps(event_metadata(event))))
         self.dirty.update((event['camera'], day) for day, _, _ in parts)
 
     def atomic(self, path, data):
@@ -112,9 +120,65 @@ class FrigateIndex:
             intervals = []
             for start, end in self.db.execute('SELECT start,end FROM events WHERE camera=? AND start<? AND end>?', (cam, finish, begin)):
                 intervals.extend({'start': left, 'end': right} for date, left, right in split_event(start, end) if date == day)
+            details = []
+            for identifier, start, end, active, raw in self.db.execute('SELECT id,start,end,active,metadata FROM events WHERE camera=? AND start<? AND end>? ORDER BY start DESC,id DESC', (cam, finish, begin)):
+                metadata = json.loads(raw)
+                for date, point, _ in split_event(start, end):
+                    if date == day:
+                        details.append({'token': event_token(identifier), 'start': start, 'end': end, 'active': bool(active), 'point': point, 'confidence': metadata.get('confidence'), 'zones': metadata.get('zones', [])})
+            self.atomic(self.root/cam/(day+'.events.json'), {'version': 1, 'events': details[:10000], 'updated': now})
             covered = [{'start': start, 'end': end} for start, end in self.db.execute('SELECT start,end FROM coverage WHERE camera=? AND date=?', (cam, day))]
             self.atomic(self.root/cam/(day+'.json'), {'source': 'frigate', 'events': [{'type': 'person', **item} for item in PersonEvents.merge_intervals(intervals)], 'analyzed': PersonEvents.merge_intervals(covered), 'updated': now})
         self.dirty.clear()
+
+    def cache_thumbnails(self, now):
+        folder = self.root/'thumbnails'
+        folder.mkdir(mode=0o750, exist_ok=True)
+        cached = []
+        for path in folder.glob('*.jpg'):
+            info = path.stat(follow_symlinks=False)
+            if now-info.st_mtime > 86400:
+                path.unlink()
+            else:
+                cached.append((info.st_mtime, info.st_size, path))
+        size = sum(item[1] for item in cached)
+        for _, length, path in sorted(cached):
+            if size <= 128*1024**2:
+                break
+            path.unlink();size -= length
+        attempts = 0
+        deadline = time.monotonic()+4
+        for identifier, cam, start, end, active, raw, checked in self.db.execute('SELECT id,camera,start,end,active,metadata,thumbnail_checked FROM events WHERE start>? ORDER BY start DESC,id DESC', (now-86400,)).fetchall():
+            if attempts >= 8 or size >= 128*1024**2 or time.monotonic() >= deadline:
+                break
+            metadata = json.loads(raw)
+            if not metadata.get('has_snapshot') or now-checked < (60 if active else 300):
+                continue
+            path = folder/(event_token(identifier)+'.jpg')
+            if not active and path.exists() and checked >= end:
+                continue
+            attempts += 1
+            self.db.execute('UPDATE events SET thumbnail_checked=? WHERE id=?', (now,identifier))
+            try:
+                with self.client.stream('GET', '/api/events/'+identifier+'/thumbnail.jpg', timeout=2) as response:
+                    response.raise_for_status()
+                    body = bytearray()
+                    for chunk in response.iter_bytes():
+                        body.extend(chunk)
+                        if len(body) > 512*1024:
+                            raise ValueError('Thumbnail too large')
+                if not body.startswith(b'\xff\xd8\xff') or not body.endswith(b'\xff\xd9'):
+                    raise ValueError('Invalid JPEG')
+                temporary = path.with_suffix('.tmp')
+                fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o640)
+                with os.fdopen(fd, 'wb') as stream:
+                    stream.write(body)
+                os.utime(temporary, (start, start))
+                os.replace(temporary, path)
+                size += len(body)
+            except (httpx.HTTPError, ValueError, OSError):
+                continue
+        self.db.commit()
 
     def poll(self):
         now = self.clock()
@@ -160,9 +224,10 @@ class FrigateIndex:
         self.db.execute('DELETE FROM coverage WHERE date<?', (cutoff,))
         self.db.commit()
         for cam in CAMERAS:
-            for path in (self.root/cam).glob('????-??-??.json'):
-                if path.stem < cutoff:
+            for path in (self.root/cam).glob('????-??-??*.json'):
+                if path.name[:10] < cutoff:
                     path.unlink()
+        self.cache_thumbnails(now)
         self.publish(now)
         active_start = self.db.execute("SELECT MIN(start) FROM events WHERE active=1").fetchone()[0]
         self.since = min(now-3600, active_start-1) if active_start is not None else now-3600

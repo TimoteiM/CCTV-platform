@@ -507,3 +507,51 @@ Frigate processed all eight streams at approximately 1.5–2 fps, without JavaSc
 errors. Mobile/desktop live and playback checks also passed with Frigate enabled;
 buffered skips continued to reuse their existing sessions. Normal Frigate memory
 usage was about 1 GiB; CPU use varied by motion and stayed under its quota.
+
+## Events page — 2026-10-05
+
+`/events` adds a visible Frigate event browser to the existing Live/Playback
+navigation. It includes camera/date filters, newest-first pagination, person
+thumbnails, confidence, event duration and ongoing status. Details show the camera,
+local start/end times, configured zones and detection source. Playback links open
+the existing player at the matching event with up to three seconds of pre-roll.
+A Watch live link opens that camera in single-camera view. Recent recordings that
+are not yet finalized are clearly marked; expired/missing recordings have no Play
+link. Saved filters and pagination are represented in the URL. Visible first-page
+results refresh every 15 seconds; dialog reading and hidden tabs are not interrupted.
+
+The existing importer migrates its SQLite metadata in place and writes atomic
+per-camera/day event catalogs. Existing event rows are retained, including older
+rows whose confidence or thumbnail was not captured. The web service reads these
+validated local JSON files without gaining network access or direct access to
+Frigate configuration. It continues to merge historical YOLO markers on Playback;
+the Events page lists individual Frigate tracks rather than inventing thumbnails
+for historical YOLO intervals.
+
+Thumbnails are copied from the internal Frigate API into the importer's private
+state directory, use hashed file identifiers, expire after one day and are bounded
+by a 128 MiB cache. Thumbnail fetch attempts have a per-poll deadline and size/time
+limits. Missing or expired images have explicit placeholders. Public JPEG delivery
+uses validated no-follow file descriptors, bounded reads, strict identifiers and
+the existing nginx authentication and no-store headers. Raw Frigate identifiers,
+camera credentials and internal API addresses are not exposed in the event data.
+
+New authenticated application routes:
+
+- `GET /events?cam=all&date=YYYY-MM-DD`
+- `GET /api/events?cam=all&date=YYYY-MM-DD&offset=0&limit=24` (up to 48 per page)
+- `GET/HEAD /event-media/{hashed_identifier}.jpg`
+
+The page uses the existing design system, a mobile bottom Events tab, keyboard
+shortcut E, accessible detail dialog and responsive card layout. Tests cover event
+pagination/filtering, playback availability, metadata migration, thumbnail expiry,
+symlinks, bounded media, invalid identifiers and malformed catalogs. Real Chromium
+checks passed at 390, 1440 and 360 pixels, including genuine thumbnails, event
+playback, camera navigation and date/empty-state handling. Lighthouse accessibility
+scored 100 for Events at both mobile and desktop sizes. Screenshots and browser
+results remain private under `benchmarks/` and the workspace `review/` directory.
+
+Final Events validation: 250 Python tests passed; targeted tests passed again after
+the pagination read optimization. Chromium and WebKit checks passed with real
+thumbnails and no JavaScript errors. Both new public routes returned 401 without
+nginx authentication, and the service's no-network preflight continued to pass.
