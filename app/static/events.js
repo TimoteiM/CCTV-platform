@@ -219,6 +219,12 @@
         `/api/events?${new URLSearchParams({ cam: camera.value, date: date.value, offset, limit: pageSize })}`,
         { signal: controller.signal, credentials: "same-origin" },
       );
+      if (response.status === 401) {
+        location.assign(
+          `/login?next=${encodeURIComponent(location.pathname + location.search)}`,
+        );
+        throw new Error("Sign in required.");
+      }
       const data = await response.json();
       if (!response.ok)
         throw new Error(data.detail || "Events could not be loaded.");

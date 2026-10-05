@@ -1413,3 +1413,5 @@ a[aria-disabled="true"] {
   outline: 2px solid var(--accent);
   outline-offset: -3px;
 }
+
+.logout-form{margin:0;display:flex}.brand img{flex:none}@media(max-width:650px){.topbar{gap:8px}.connection{font-size:11px}}

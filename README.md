@@ -1,7 +1,7 @@
 # CCTV platform
 
-FastAPI/Jinja2 application in `/opt/cctv-web`. The recorder, retention, nginx,
-authentication, firewall, and camera credential environment remain untouched.
+FastAPI/Jinja2 application in `/opt/cctv-web`. The recorder, retention, firewall, and camera credential environment remain untouched.
+A branded login page now protects access through revocable browser sessions.
 The production service and socket are enabled and running exclusively on localhost.
 
 ## Production operation
@@ -19,7 +19,7 @@ server against the production cache.
 
 The dedicated `cctv-web` account has no login or sudo. Code, configuration and
 virtual environment remain root-owned and read-only to the service. Only the
-cache (2750 cctv-web:www-data, validated MP4s 0640; metadata/partials 0600), `/run/cctv-web` (0700), and isolated temporary
+cache (2750 cctv-web:www-data, validated MP4s 0640; metadata/partials 0600), `/run/cctv-web` (0700), `/var/lib/cctv-auth` (0700), and isolated temporary
 storage are writable. Original recordings are mounted read-only inside the service.
 Supplementary group `cctv` is granted by the unit solely to read the originals;
 `/etc/cctv`, nginx configuration and certificate directories are inaccessible.
@@ -39,10 +39,29 @@ Restart-on-failure waits three seconds; repeated failures are rate limited.
 Graceful shutdown terminates only application-owned FFmpeg jobs and cleans partial
 cache outputs. Enabled boot targets were verified without rebooting the recorder.
 
-Nginx is the authentication boundary and proxies the application over localhost.
-The existing cctvadmin password file is unchanged. Basic Auth covers every public
-application route. Only loopback is trusted for overwritten forwarding headers;
-nginx strips Authorization before proxying. Localhost requests have no Basic Auth.
+The application checks opaque sessions before serving pages, API responses or media.
+Nginx additionally checks sessions on internal X-Accel media locations. The browser
+Basic Auth prompt has been replaced by `/login`; both existing account passwords
+are preserved through a root-owned copy of the existing hashes at
+`/etc/cctv-web-auth/users` (root:cctv-web, 0640). This dedicated directory is readable
+without granting access to camera credentials, nginx or certificates.
+
+“Keep me signed in” sets an HTTPS-only, HttpOnly, SameSite=Lax, host-only cookie
+for one year, renewed when visiting Live, Playback or Events. Unchecked sign-ins
+use a browser-session cookie with a 24-hour server limit. Passwords are never put
+in browser storage. Private SQLite state stores only SHA-256 digests of random
+session tokens, survives restarts, and revokes the current session on Sign out.
+Changing an account hash and restarting the service invalidates that account's
+sessions. Clearing browser data or using another device requires signing in again.
+Login forms use expiring CSRF tokens; logout uses a session-bound token. Cross-origin
+mutating requests are rejected. Failed sign-ins are limited per IP and account
+(10 attempts per 15 minutes), with limits surviving application restarts.
+
+Production sets `CCTV_AUTH_CREDENTIALS` and `CCTV_AUTH_STATE`; a configured but
+unreadable credential store fails startup. Isolated test instances omit this
+setting. Never omit it from production. `deploy/nginx-cctv.conf.example` documents
+session-protected delivery. Only loopback is trusted for overwritten forwarding
+headers; nginx strips Authorization before proxying.
 
 ## Configuration
 
@@ -344,7 +363,7 @@ Live and Playback use a shared dark design system, inline SVG controls, keyboard
 help and connection indicator. Mobile navigation is a bottom tab bar with safe
 area padding; all mobile controls have at least 44px targets and reduced-motion
 preferences are respected. A manifest and local 192/512px icons enable standalone
-home-screen launch. No service worker caches private footage. Existing Basic auth,
+home-screen launch. No service worker caches private footage. Authenticated delivery,
 CSP, frame blocking and security headers are unchanged.
 
 Live has saved single/four/automatic layouts, compact mute/history/expand/fullscreen
@@ -533,7 +552,7 @@ state directory, use hashed file identifiers, expire after one day and are bound
 by a 128 MiB cache. Thumbnail fetch attempts have a per-poll deadline and size/time
 limits. Missing or expired images have explicit placeholders. Public JPEG delivery
 uses validated no-follow file descriptors, bounded reads, strict identifiers and
-the existing nginx authentication and no-store headers. Raw Frigate identifiers,
+session authentication and no-store headers. Raw Frigate identifiers,
 camera credentials and internal API addresses are not exposed in the event data.
 
 New authenticated application routes:

@@ -1,6 +1,12 @@
 import os
 import logging
 import time
+import secrets
+import hmac
+from urllib.parse import parse_qs, quote
+from starlette.concurrency import run_in_threadpool
+from fastapi.responses import RedirectResponse
+from .auth import Sessions, COOKIE, FORM_COOKIE, destination
 from datetime import datetime, timedelta
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -35,6 +41,7 @@ def request_category(path):
 
 def create_app(settings=None, playback=None):
     settings = settings or Settings.from_env()
+    auth = Sessions(settings.auth_credentials, settings.auth_state) if settings.auth_credentials else None
     store = Store(settings)
     provider = playback or PlaybackManager(settings)
     instant = InstantPlayback(settings)
@@ -56,12 +63,26 @@ def create_app(settings=None, playback=None):
     async def security(request, call_next):
         category = request_category(request.url.path)
         method = request.method if request.method in ('GET', 'POST', 'HEAD') else 'other'
-        # Authentication belongs to nginx. No client identity headers are trusted here.
+        # Sessions are checked before any camera, API or media handler runs.
         length = request.headers.get('content-length', '0')
         if not length.isdecimal() or int(length) > 4096 or request.headers.get('transfer-encoding'):
             REQUEST_LOG.info('Request method=%s category=%s status=413', method, category)
             return JSONResponse({'detail': 'Request body not allowed'}, status_code=413)
-        response = await call_next(request)
+        session = await run_in_threadpool(auth.lookup, request.cookies.get(COOKIE)) if auth else None
+        request.state.session = session
+        public = request.url.path in ('/login', '/auth/check') or request.url.path.startswith('/static/')
+        if auth and not session and not public:
+            if request.method in ('GET', 'HEAD') and request.url.path in ('/', '/live', '/playback', '/events') or (request.method == 'GET' and request.url.path.startswith('/camera/')):
+                response = RedirectResponse('/login?next=' + quote(str(request.url.path) + ('?' + request.url.query if request.url.query else ''), safe=''), status_code=303)
+            else:
+                response = JSONResponse({'detail': 'Sign in required'}, status_code=401)
+        elif auth and request.method not in ('GET', 'HEAD', 'OPTIONS') and (request.headers.get('sec-fetch-site') == 'cross-site' or (request.headers.get('origin') and request.headers['origin'] != str(request.base_url).rstrip('/'))):
+            response = JSONResponse({'detail': 'Request origin not allowed'}, status_code=403)
+        else:
+            response = await call_next(request)
+        if auth and session and session['remember'] and request.url.path in ('/', '/live', '/playback', '/events'):
+            await run_in_threadpool(auth.renew, request.cookies[COOKIE])
+            auth.cookie(response, request.cookies[COOKIE], True)
         response.headers.update({'X-Content-Type-Options': 'nosniff', 'X-Frame-Options': 'DENY', 'Referrer-Policy': 'no-referrer', 'Cache-Control': 'no-store', 'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; media-src 'self' blob:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"})
         REQUEST_LOG.info('Request method=%s category=%s status=%s', method, category, response.status_code)
         return response
@@ -71,7 +92,64 @@ def create_app(settings=None, playback=None):
         return JSONResponse({'detail': 'Request could not be completed'}, status_code=500)
 
     def context(request):
-        return dict(request=request, cameras=settings.camera_names)
+        return dict(request=request, cameras=settings.camera_names, authenticated=bool(auth and request.state.session), logout_csrf=auth.digest(request.cookies.get(COOKIE, '')) if auth else '')
+
+    def login_response(request, next_path='/live', error=None, status=200):
+        token = secrets.token_urlsafe(32)
+        response = templates.TemplateResponse(request=request, name='login.html', context={'next': destination(next_path), 'csrf': token, 'error': error}, status_code=status)
+        response.set_cookie(FORM_COOKIE, token, max_age=600, secure=True, httponly=True, samesite='strict', path='/')
+        return response
+
+    @app.get('/login', response_class=HTMLResponse)
+    def login_page(request: Request, next: str = '/live'):
+        if not auth or request.state.session:
+            return RedirectResponse(destination(next), status_code=303)
+        return login_response(request, next)
+
+    @app.post('/login')
+    async def login_submit(request: Request):
+        if not auth:
+            return RedirectResponse('/live', status_code=303)
+        body = await request.body()
+        if len(body) > 4096:
+            return JSONResponse({'detail': 'Request too large'}, status_code=413)
+        try:
+            form = parse_qs(body.decode('utf-8'), max_num_fields=8)
+        except (ValueError, UnicodeDecodeError):
+            return login_response(request, error='Please try signing in again.', status=400)
+        field = lambda name: form.get(name, [''])[0]
+        csrf = field('csrf')
+        if not csrf or not hmac.compare_digest(csrf.encode(), request.cookies.get(FORM_COOKIE, '').encode()):
+            return login_response(request, field('next'), 'Your sign-in form expired. Please try again.', 403)
+        username, password = field('username').strip(), field('password')
+        if len(username) > 128 or not username or not password or '\x00' in password:
+            result = 'invalid'
+        else:
+            result = await run_in_threadpool(auth.authenticate, username, password, request.client.host if request.client else 'unknown')
+        if result != 'valid':
+            return login_response(request, field('next'), 'Too many attempts. Please try again in 15 minutes.' if result == 'limited' else 'Username or password is incorrect.', 429 if result == 'limited' else 401)
+        remember = field('remember') == 'on'
+        token = await run_in_threadpool(auth.issue, username, remember)
+        response = RedirectResponse(destination(field('next')), status_code=303)
+        auth.cookie(response, token, remember)
+        response.delete_cookie(FORM_COOKIE, secure=True, httponly=True, samesite='strict')
+        return response
+
+    @app.get('/auth/check')
+    def auth_check(request: Request):
+        return Response(status_code=204 if auth and request.state.session else 401)
+
+    @app.post('/logout')
+    async def logout(request: Request):
+        if auth:
+            body = parse_qs((await request.body()).decode('utf-8'), max_num_fields=2)
+            token = request.cookies.get(COOKIE, '')
+            if not hmac.compare_digest(body.get('csrf', [''])[0].encode(), auth.digest(token).encode()):
+                return JSONResponse({'detail': 'Request not allowed'}, status_code=403)
+            await run_in_threadpool(auth.revoke, token)
+        response = RedirectResponse('/login', status_code=303)
+        response.delete_cookie(COOKIE, secure=True, httponly=True, samesite='lax')
+        return response
 
     @app.get('/', response_class=HTMLResponse)
     def dashboard(request: Request):

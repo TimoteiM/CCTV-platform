@@ -28,6 +28,8 @@ KillSignal=SIGTERM
 SendSIGKILL=yes
 OOMPolicy=stop
 UMask=0077
+StateDirectory=cctv-auth
+StateDirectoryMode=0700
 RuntimeDirectory=cctv-web
 RuntimeDirectoryMode=0700
 RuntimeDirectoryPreserve=no
@@ -54,7 +56,7 @@ SystemCallArchitectures=native
 SystemCallFilter=~@mount @reboot @swap @raw-io @clock @module
 SystemCallErrorNumber=EPERM
 ReadOnlyPaths=/opt/cctv-web /srv/cctv
-ReadWritePaths=/opt/cctv-web/var/cache /run/cctv-web /var/lib/cctv-persons/requests
+ReadWritePaths=/var/lib/cctv-auth /opt/cctv-web/var/cache /run/cctv-web /var/lib/cctv-persons/requests
 InaccessiblePaths=/etc/cctv /etc/nginx /etc/letsencrypt -/run/dbus -/run/systemd/private
 RestrictAddressFamilies=AF_UNIX
 
