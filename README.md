@@ -1,6 +1,7 @@
 # CCTV platform
 
-FastAPI/Jinja2 application in `/opt/cctv-web`. The recorder, retention, firewall, and camera credential environment remain untouched.
+FastAPI/Jinja2 application in `/opt/cctv-web`. Recording and retention run independently of the web application.
+The firewall and camera credential environment remain unchanged.
 A branded login page now protects access through revocable browser sessions.
 The production service and socket are enabled and running exclusively on localhost.
 
@@ -578,3 +579,20 @@ Final Events validation: 250 Python tests passed; targeted tests passed again af
 the pagination read optimization. Chromium and WebKit checks passed with real
 thumbnails and no JavaScript errors. Both new public routes returned 401 without
 nginx authentication, and the service's no-network preflight continued to pass.
+
+## Recorder stalls and missing playback
+
+A running FFmpeg process can be stalled without writing footage. Compare the latest
+recording modification time with the current time; check the recorder service as
+well as playback. Person detections use the separate Frigate stream and can exist
+without saved video. Detections alone cannot reconstruct missing footage.
+
+Acasă 3 uses `/etc/systemd/system/cctv-cam03.service.d/timeout.conf`, documented by
+`deploy/recorder/cam03-timeout.conf.example`. Its RTSP socket timeout is 15 seconds;
+the existing `Restart=always` and ten-second restart delay reconnect the recorder.
+Stopping a stuck recorder is bounded at 20 seconds. Credentials remain referenced
+through the original root-owned environment file. Other recording services and
+retention settings are unchanged.
+
+New video becomes available after its five-minute segment closes and its last
+write is at least 60 seconds old. The active recording stays excluded from playback.
