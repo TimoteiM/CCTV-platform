@@ -44,6 +44,7 @@ def test_login_public_and_deep_link(client):
     assert 'Keep me signed in' in login.text
     assert c.get('/static/logo.svg').status_code == 200
     assert 'no-store' in login.headers['cache-control']
+    assert login.headers['referrer-policy'] == 'same-origin'
 
 def test_remembered_session_secure_and_persistent(client):
     c, settings = client

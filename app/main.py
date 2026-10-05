@@ -83,7 +83,7 @@ def create_app(settings=None, playback=None):
         if auth and session and session['remember'] and request.url.path in ('/', '/live', '/playback', '/events'):
             await run_in_threadpool(auth.renew, request.cookies[COOKIE])
             auth.cookie(response, request.cookies[COOKIE], True)
-        response.headers.update({'X-Content-Type-Options': 'nosniff', 'X-Frame-Options': 'DENY', 'Referrer-Policy': 'no-referrer', 'Cache-Control': 'no-store', 'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; media-src 'self' blob:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"})
+        response.headers.update({'X-Content-Type-Options': 'nosniff', 'X-Frame-Options': 'DENY', 'Referrer-Policy': 'same-origin', 'Cache-Control': 'no-store', 'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; media-src 'self' blob:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"})
         REQUEST_LOG.info('Request method=%s category=%s status=%s', method, category, response.status_code)
         return response
 
