@@ -156,8 +156,7 @@
       selector.value = requestedCamera;
       layout = 1;
     }
-    const visible = (tile) =>
-      !document.hidden && !tile.hidden && tile.intersecting;
+    const visible = (tile) => !document.hidden && !tile.hidden;
     function state(tile, name, message = "") {
       const badge = $(".live-state", tile),
         overlay = $(".video-overlay", tile);
@@ -200,7 +199,11 @@
       tile.want = false;
       release(tile);
       if (!tile.offline)
-        state(tile, "idle", "Stream paused while out of view.");
+        state(
+          tile,
+          "idle",
+          "Stream paused while the page or camera is hidden.",
+        );
     }
     function retry(tile, message) {
       if (!tile.want) return;
@@ -298,8 +301,23 @@
                 error.fatal &&
                 tile.lease === lease &&
                 serial === (tile.serial || 0)
-              )
-                retry(tile, "Connection lost.");
+              ) {
+                // Repair the browser player before restarting the camera session.
+                tile.playerRecoveries = (tile.playerRecoveries || 0) + 1;
+                if (
+                  tile.playerRecoveries <= 2 &&
+                  error.type === Hls.ErrorTypes.MEDIA_ERROR
+                ) {
+                  hls.recoverMediaError();
+                } else if (
+                  tile.playerRecoveries <= 2 &&
+                  error.type === Hls.ErrorTypes.NETWORK_ERROR
+                ) {
+                  hls.startLoad(-1);
+                } else {
+                  retry(tile, "Connection lost.");
+                }
+              }
             });
           } else {
             tile.offline = true;
@@ -321,18 +339,23 @@
           retry(tile, error.message);
       }
     }
+    // Keep selected streams leased and buffered even outside the viewport.
+    // Mobile browsers may pause off-screen video; resume the same stream on return.
     const observer = new IntersectionObserver(
       (entries) => {
         for (const entry of entries) {
           const tile = entry.target;
-          tile.intersecting = entry.isIntersecting;
-          if (visible(tile) && !tile.want) {
-            tile.want = true;
-            tile.timer = setTimeout(
-              () => start(tile),
-              tiles.filter((item) => !item.hidden).indexOf(tile) * 350,
-            );
-          } else if (!visible(tile) && tile.want) suspend(tile);
+          if (!entry.isIntersecting || !tile.want || !tile.lease) continue;
+          const video = $("video", tile);
+          if (!tile.hls && video.paused && video.seekable.length) {
+            const edge = video.seekable.end(video.seekable.length - 1);
+            if (edge - video.currentTime > 5)
+              video.currentTime = Math.max(
+                video.seekable.start(video.seekable.length - 1),
+                edge - 2,
+              );
+          }
+          if (video.paused) video.play().catch(() => {});
         }
       },
       { threshold: 0.01 },
@@ -343,7 +366,12 @@
       );
       tiles.forEach((tile, i) => {
         tile.hidden = !(layout === 8 || (i - focus + 8) % 8 < layout);
-        if (tile.hidden) suspend(tile);
+        if (!visible(tile)) {
+          if (tile.want || tile.lease || tile.timer) suspend(tile);
+        } else if (!tile.want) {
+          tile.want = true;
+          tile.timer = setTimeout(() => start(tile), i * 350);
+        }
         observer.unobserve(tile);
         if (!tile.hidden) observer.observe(tile);
       });
@@ -392,6 +420,7 @@
       video.addEventListener("playing", () => {
         if (tile.want) {
           tile.attempts = 0;
+          tile.playerRecoveries = 0;
           tile.lastSeen = Date.now();
           state(tile, "live");
         }

@@ -370,8 +370,12 @@ Live has saved single/four/automatic layouts, compact mute/history/expand/fullsc
 controls, tile tap to expand, double tap to fullscreen, single-camera arrows/swipe,
 and Escape/back navigation. Connection badges track Connecting, Live, Reconnecting
 and Offline consistently. Consecutive failures use exponential backoff and stop
-after five retries, with explicit Retry and last-seen time. IntersectionObserver
-suspends off-screen tiles; hidden tabs and page departure release their leases.
+after five retries, with explicit Retry and last-seen time. All cameras selected in the grid keep their leases and buffers when scrolled
+off screen, including all eight in the mobile All cameras view. IntersectionObserver
+only resumes browser-paused video on re-entry and catches up to the live edge.
+HLS player errors get up to two local recovery attempts before reconnecting the
+camera session. Hidden tabs, cameras excluded by the selected layout and page departure release
+their leases. Keeping eight streams connected increases mobile data and battery use.
 Desktop automatic layout fits eight cameras in two rows at 1280px and wider.
 
 Playback opens near the end of the latest finalized recording. Existing camera
