@@ -21,7 +21,7 @@ def live(tmp_path):
  clock=Clock();processes=[]
  def factory(cam,folder):
   p=Process();processes.append(p);(folder/'index.m3u8').write_text('#EXTM3U\nseg00000.ts\n');(folder/'seg00000.ts').write_bytes(b'media');return p
- manager=LiveManager(tmp_path/'live',factory,clock);manager.terminate=lambda p:setattr(p,'code',0)
+ manager=LiveManager(tmp_path/'live',factory,clock,sleep=lambda delay:setattr(clock,'now',clock.now+delay));manager.terminate=lambda p:setattr(p,'code',0)
  yield manager,clock,processes
  manager.close()
 @pytest.mark.parametrize('camera',CAMERAS)
@@ -48,14 +48,15 @@ def test_camera_unavailable_sanitized(tmp_path,caplog):
  assert e.value.detail=='Camera unavailable' and 'secret' not in caplog.text
  assert not manager.pipelines
 def test_live_capacity_and_startup_rate(live):
- manager,clock,_=live
- manager.session('cam01')
- with pytest.raises(HTTPException) as e:manager.session('cam02')
- assert e.value.status_code==429
- for i in range(2,8):clock.now+=.3;manager.session(f'cam{i:02}')
- clock.now+=2
- with pytest.raises(HTTPException) as e:manager.max=7;manager.session('cam08')
- assert e.value.status_code==429
+ manager,clock,processes=live
+ for camera in CAMERAS:assert manager.session(camera)['state']=='live'
+ assert len(processes)==8
+ assert clock.now>=1.75
+
+ manager.drop('cam08');manager.max=7
+ with pytest.raises(HTTPException) as error:manager.session('cam08')
+ assert error.value.status_code==429
+
 @pytest.mark.parametrize('filename',['../index.m3u8','seg00000.ts/','seg00000.ts\\','.worker.lock','password','index.m3u8.tmp'])
 def test_live_media_traversal(live,filename):
  manager,_,_=live;s=manager.session('cam01')
@@ -201,3 +202,37 @@ def test_eight_simultaneous_live_pipelines(live):
         clock.now += .3
         assert manager.session(f'cam{i:02}')['state']=='live'
     assert len(processes)==8
+
+
+def test_failed_pipeline_replacement_reclaims_all_old_viewers(live):
+ manager,_,processes=live
+ old=[manager.session('cam01') for _ in range(64)]
+ processes[0].code=1
+ new=manager.session('cam01')
+ assert new['generation']!=old[0]['generation']
+ assert len(manager.leases)==1
+ assert len(processes)==2
+ assert manager.state('cam01',new['lease'])['state']=='live'
+ with pytest.raises(HTTPException):manager.state('cam01',old[0]['lease'])
+
+
+def test_real_viewer_limit_remains_enforced(live):
+ manager,_,processes=live
+ for _ in range(64):manager.session('cam01')
+ with pytest.raises(HTTPException) as error:manager.session('cam01')
+ assert error.value.status_code==429 and len(processes)==1
+
+
+def test_existing_camera_does_not_wait_for_startup_spacing(live):
+ manager,clock,_=live
+ manager.session('cam01');manager.session('cam01')
+ assert clock.now==0
+
+
+def test_expired_viewers_free_capacity_without_restarting_camera(live):
+ manager,clock,processes=live
+ for _ in range(64):manager.session('cam01')
+ clock.now=21
+ new=manager.session('cam01')
+ assert len(manager.leases)==1 and len(processes)==1
+ assert new['state']=='live'

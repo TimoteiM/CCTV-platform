@@ -215,7 +215,7 @@ The primary landing page is Live; Playback uses camera/date/time and a day timel
 Camera names in cameras.json are Acasă1–8, independent of unchanged cam IDs.
 New separate cctv-live.service runs demand-driven H.264/AAC substream HLS: maximum
 eight pipelines shared across viewers, 20s leases and 30s idle grace. The eight-camera
-layout is the default; visible cameras start 300ms apart. HLS segments are one second. No RTSP/camera credentials reach browsers.
+layout is the default; selected cameras start 350ms apart. HLS segments are one second. No RTSP/camera credentials reach browsers.
 Control is private UDS, media is validated and delivered by an nginx internal route.
 
 ```
@@ -616,3 +616,14 @@ camera power or network outage. Investigate repeated recovery warnings.
 
 New video becomes available after its five-minute segment closes and its last
 write is at least 60 seconds old. The active recording stays excluded from playback.
+
+## Live admission and viewer cleanup
+
+The live service shares at most one encoder pipeline per camera, with eight camera
+pipelines and 64 viewer leases maximum. Startup bursts are serialized and paced
+at 250ms intervals instead of being rejected as “capacity reached.” Joining an
+existing healthy camera has no startup wait and does not create another encoder.
+Replacing a failed pipeline immediately invalidates its old viewer leases; normal
+lease expiry remains 20 seconds. Genuine memory/CPU pressure, a configured pipeline
+limit or 64 active viewers still enforce limits. Rejections log only their category
+and pipeline/viewer counts, without credentials or viewer identities.

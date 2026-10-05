@@ -7,8 +7,8 @@ from contextlib import asynccontextmanager
 LOG=logging.getLogger('cctv.live')
 CAMERA=re.compile(r'cam0[1-8]');TOKEN=re.compile(r'[a-f0-9]{32}');FILE=re.compile(r'index\.m3u8|seg[0-9]{5,}\.ts')
 class LiveManager:
- def __init__(self,root=Path('/var/cache/cctv-live'),factory=None,clock=time.monotonic,max_pipelines=8,idle_timeout=30,lease_timeout=20):
-  self.root=Path(root);self.factory=factory or self.spawn;self.clock=clock;self.max=max_pipelines;self.idle=idle_timeout;self.ttl=lease_timeout;self.lock=threading.RLock();self.pipelines={};self.leases={};self.last_start=-100;self.stop=threading.Event()
+ def __init__(self,root=Path('/var/cache/cctv-live'),factory=None,clock=time.monotonic,max_pipelines=8,idle_timeout=30,lease_timeout=20,sleep=time.sleep):
+  self.root=Path(root);self.factory=factory or self.spawn;self.clock=clock;self.max=max_pipelines;self.idle=idle_timeout;self.ttl=lease_timeout;self.lock=threading.RLock();self.pipelines={};self.leases={};self.sleep=sleep;self.last_start=-100;self.stop=threading.Event()
  def check(self,cam):
   if not CAMERA.fullmatch(cam):raise HTTPException(404,'Camera not found')
  def spawn(self,cam,folder):
@@ -32,7 +32,10 @@ class LiveManager:
     p.wait()
  def drop(self,cam):
   pipeline=self.pipelines.pop(cam,None)
-  if pipeline:self.terminate(pipeline['process']);shutil.rmtree(pipeline['folder']);LOG.info('Live pipeline stopped')
+  if pipeline:
+   for key,item in list(self.leases.items()):
+    if item['camera']==cam:self.leases.pop(key)
+   self.terminate(pipeline['process']);shutil.rmtree(pipeline['folder']);LOG.info('Live pipeline stopped')
  def pressure(self):
   try:
    available=int(next(x for x in Path('/proc/meminfo').read_text().splitlines() if x.startswith('MemAvailable:')).split()[1])*1024
@@ -53,31 +56,38 @@ class LiveManager:
     for cam in list(self.pipelines):self.drop(cam)
     self.leases.clear();return
    for key,lease in list(self.leases.items()):
-    if lease['expires']<=now:self.leases.pop(key)
+    pipeline=self.pipelines.get(lease['camera'])
+    if lease['expires']<=now or not pipeline or lease['generation']!=pipeline['generation']:self.leases.pop(key)
    for cam,pipeline in list(self.pipelines.items()):
     viewers=any(l['camera']==cam for l in self.leases.values())
     if viewers:pipeline['idle_since']=None
     elif pipeline['idle_since'] is None:pipeline['idle_since']=now
     if not viewers and now-pipeline['idle_since']>=self.idle:self.drop(cam)
     elif pipeline['process'].poll() is not None and not viewers:self.drop(cam)
+ def reject_capacity(self,reason):
+  LOG.warning('Live admission refused reason=%s pipelines=%s viewers=%s',reason,len(self.pipelines),len(self.leases))
+  raise HTTPException(429,'Server live capacity reached')
  def session(self,cam):
   self.check(cam)
   with self.lock:
    self.reap()
-   if self.pressure():raise HTTPException(429,'Server live capacity reached')
+   if self.pressure():self.reject_capacity('resource-pressure')
    now=self.clock();pipeline=self.pipelines.get(cam)
    if pipeline and pipeline['process'].poll() is not None:
     self.drop(cam);pipeline=None
    if pipeline is None:
     idle_cameras=[name for name in self.pipelines if not any(lease['camera']==name for lease in self.leases.values())]
     if len(self.pipelines)>=self.max and idle_cameras:self.drop(idle_cameras[0])
-    if len(self.pipelines)>=self.max or now-self.last_start<0.25:raise HTTPException(429,'Server live capacity reached')
-    if len(self.leases)>=64:raise HTTPException(429,'Server live capacity reached')
+    if len(self.pipelines)>=self.max:self.reject_capacity('pipeline-limit')
+    # Pace real pipeline starts instead of rejecting a normal multi-camera burst.
+    delay=0.25-(now-self.last_start)
+    if delay>0:self.sleep(delay);now=self.clock()
+    if len(self.leases)>=64:self.reject_capacity('viewer-limit')
     generation=secrets.token_hex(16);folder=self.root/cam/generation;folder.mkdir(parents=True,mode=0o750)
     try:process=self.factory(cam,folder)
     except Exception:shutil.rmtree(folder);raise HTTPException(503,'Camera unavailable') from None
     pipeline={'process':process,'generation':generation,'folder':folder,'started':now,'idle_since':None};self.pipelines[cam]=pipeline;self.last_start=now;LOG.info('Live pipeline starting')
-   if len(self.leases)>=64:raise HTTPException(429,'Server live capacity reached')
+   if len(self.leases)>=64:self.reject_capacity('viewer-limit')
    lease=secrets.token_hex(16);self.leases[lease]={'camera':cam,'generation':pipeline['generation'],'expires':now+self.ttl};pipeline['idle_since']=None
    return self.state(cam,lease)
  def state(self,cam,lease,renew=False):
